@@ -1,0 +1,9 @@
+numpy
+pandas
+opencv-python
+scikit-learn
+joblib
+Pillow
+onnxruntime
+python-dotenv
+pydantic
