@@ -1,27 +1,24 @@
 {
-  "version": 2,
-  "builds": [
+  "rewrites": [
     {
-      "src": "server.py",
-      "use": "@vercel/python"
+      "source": "/api/analyze",
+      "destination": "/api/analyze.py"
     },
     {
-      "src": "public/**",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/server.py"
+      "source": "/api/status",
+      "destination": "/api/status.py"
     },
     {
-      "src": "/analyze",
-      "dest": "/server.py"
+      "source": "/api/health",
+      "destination": "/api/status.py"
     },
     {
-      "src": "/(.*)",
-      "dest": "/public/$1"
+      "source": "/analyze",
+      "destination": "/api/analyze.py"
+    },
+    {
+      "source": "/api/:match*",
+      "destination": "/api/index.py"
     }
   ]
 }

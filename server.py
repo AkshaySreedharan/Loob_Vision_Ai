@@ -25,8 +25,9 @@ except Exception as e:
     print(f"[SERVER WARNING] Could not compile workflow on startup: {e}")
     workflow_app = None
 
-TEMP_DIR = PROJECT_ROOT / "temp_uploads"
-TEMP_DIR.mkdir(exist_ok=True)
+# Use OS temp directory (required for read-only serverless platforms like Vercel)
+TEMP_DIR = Path(tempfile.gettempdir()) / "loob_temp_uploads"
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -45,7 +46,7 @@ class LoobVisionHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         clean_path = self.path.split("?")[0].rstrip("/")
-        if clean_path in ("/api/status", "/api/health", "/status", "/health"):
+        if any(term in clean_path for term in ("status", "health")):
             self.send_json_response({
                 "status": "ready",
                 "model": "Original Image Model",
@@ -57,12 +58,8 @@ class LoobVisionHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
-        clean_path = self.path.split("?")[0].rstrip("/")
-        if clean_path in ("/api/analyze", "/analyze"):
-            self.handle_analyze()
-            return
-
-        self.send_error(404, "Endpoint not found")
+        # All POST requests to this service are analysis requests
+        self.handle_analyze()
 
     def handle_analyze(self):
         content_length = int(self.headers.get("Content-Length", 0))
