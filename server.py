@@ -39,13 +39,13 @@ class LoobVisionHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         # Serve static files from 'public' folder if present, else project root
         public_dir = PROJECT_ROOT / "public"
-        if public_dir.exists():
-            super().__init__(*args, directory=str(public_dir), **kwargs)
-        else:
-            super().__init__(*args, directory=str(PROJECT_ROOT), **kwargs)
+        if "directory" not in kwargs:
+            kwargs["directory"] = str(public_dir) if public_dir.exists() else str(PROJECT_ROOT)
+        super().__init__(*args, **kwargs)
 
     def do_GET(self):
-        if self.path == "/api/status" or self.path == "/api/health":
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path in ("/api/status", "/api/health", "/status", "/health"):
             self.send_json_response({
                 "status": "ready",
                 "model": "Original Image Model",
@@ -57,7 +57,8 @@ class LoobVisionHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
-        if self.path == "/api/analyze" or self.path == "/analyze":
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path in ("/api/analyze", "/analyze"):
             self.handle_analyze()
             return
 
@@ -148,6 +149,14 @@ def run_server(port=8000):
     except KeyboardInterrupt:
         print("\n[SERVER] Server stopped.")
         httpd.server_close()
+
+
+# ============================================================
+# EXPORT HANDLERS FOR VERCEL SERVERLESS RUNTIME
+# ============================================================
+handler = LoobVisionHandler
+app = LoobVisionHandler
+application = LoobVisionHandler
 
 
 if __name__ == "__main__":

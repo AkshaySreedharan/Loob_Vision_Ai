@@ -1,9 +1,11 @@
 numpy
 pandas
-opencv-python
+opencv-python-headless
 scikit-learn
 joblib
 Pillow
 onnxruntime
 python-dotenv
 pydantic
+langchain-google-genai
+langgraph
