@@ -1,3 +1,9 @@
+"""
+CRITICAL ARCHITECTURAL COMPONENT:
+This class definition is required by joblib to deserialize
+models/color/color_analysis_pipeline.joblib.
+Do NOT delete, rename, or move this file without re-serializing the pipeline model.
+"""
 import numpy as np
 
 

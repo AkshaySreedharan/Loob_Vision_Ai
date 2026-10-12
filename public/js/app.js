@@ -5,7 +5,7 @@
 const { useState, useEffect, useRef } = React;
 const {
   Container, Row, Col, Card, Button, Navbar, Badge,
-  Form, Spinner, Accordion, Alert, Table, Stack
+  Form, Spinner, Accordion, Alert, Table, Stack, Modal
 } = ReactBootstrap;
 
 // ============================================================
@@ -508,7 +508,7 @@ function CameraPanel({
 // ============================================================
 // RESULT ANALYSIS & TECHNICAL DETAILS PANEL
 // ============================================================
-function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
+function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry, onOpenReport }) {
   const [reasoningTheme, setReasoningTheme] = useState('gold');
 
   if (isAnalyzing) {
@@ -715,6 +715,27 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
           <p className="recommendation-text">{currentConfig.recommendation}</p>
         </div>
 
+        {/* PROMINENT ACTION: VIEW FULL ANALYSIS REPORT */}
+        <Button 
+          className="btn-loob-primary w-100 py-2 fs-6 fw-bold mb-3 d-flex align-items-center justify-content-center gap-2"
+          onClick={onOpenReport}
+          style={{
+            letterSpacing: '0.5px',
+            background: 'linear-gradient(135deg, #00b8d9 0%, #0066cc 100%)',
+            boxShadow: '0 0 15px rgba(0, 184, 217, 0.4)',
+            border: 'none'
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          VIEW FULL ANALYSIS REPORT (PDF / PREVIEW)
+        </Button>
+
         {/* Accordions for Technical Evidence & Reports */}
         <Accordion defaultActiveKey="0" className="loob-accordion mb-3">
           
@@ -888,6 +909,559 @@ function renderAgreementBadge(result) {
 }
 
 // ============================================================
+// ANALYSIS REPORT MODAL COMPONENT (PREVIEW & DOWNLOAD)
+// ============================================================
+function AnalysisReportModal({ show, onHide, result, capturedImage }) {
+  const [viewMode, setViewMode] = useState('interactive'); // 'interactive' or 'pdf'
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+
+  if (!result) return null;
+
+  // Extract structured report or assemble fallback
+  const report = result.report || {
+    metadata: {
+      report_id: result.report_id || `LOOV-RPT-${Date.now().toString(36).toUpperCase()}`,
+      timestamp_formatted: new Date().toUTCString(),
+      system_version: "LOOV VISION AI v2.4 (Industrial Edition)"
+    },
+    executive_summary: {
+      final_class: (result.final_class || "c3").toLowerCase(),
+      condition_label: result.status || "Analyzed",
+      confidence_pct: typeof result.confidence === "number" ? `${(result.confidence * 100).toFixed(1)}%` : "85.0%",
+      summary_headline: "LUBRICANT CONDITION REPORT",
+      summary_text: result.reasoning || "Multi-modal analysis completed.",
+      operational_urgency: "Operational Advisory"
+    },
+    models: {
+      efficientnet: {
+        model_name: "EfficientNet-B3 (Optimized ONNX)",
+        weight: 0.55,
+        predicted_class: (result.efficientnet_evidence?.prediction || "c3").toLowerCase(),
+        condition_label: result.efficientnet_evidence?.status || "Analyzed",
+        probabilities: result.efficientnet_evidence?.probabilities || { c1: 0, c2: 0, c3: 0 },
+        interpretation: "EfficientNet-B3 deep convolutional feature extraction."
+      },
+      color: {
+        model_name: "Two-Stage Color Analysis Pipeline",
+        weight: 0.15,
+        predicted_class: (result.color_evidence?.prediction || "c3").toLowerCase(),
+        condition_label: result.color_evidence?.status || "Analyzed",
+        probabilities: result.color_evidence?.probabilities || { c1: 0, c2: 0, c3: 0 },
+        features: result.color_evidence?.features || null,
+        interpretation: "Colorimetric feature evaluation."
+      },
+      texture: {
+        model_name: "Texture Random Forest v4",
+        weight: 0.30,
+        predicted_class: (result.texture_evidence?.prediction || "c3").toLowerCase(),
+        condition_label: result.texture_evidence?.status || "Analyzed",
+        probabilities: result.texture_evidence?.probabilities || { c1: 0, c2: 0, c3: 0 },
+        features: result.texture_evidence?.features || null,
+        interpretation: "Surface spatial texture analysis."
+      }
+    },
+    agreement: {
+      consensus_status: "Evaluated",
+      agreement_analysis: "Multi-modal consensus analysis.",
+      models_supporting: 3,
+      total_models: 3
+    },
+    reasoning: {
+      decision_narrative: result.reasoning || result.analysis_report || "Evidence synthesized.",
+      supporting_factors: ["Multi-model agreement", "Visual feature corroboration"],
+      uncertainties_or_caveats: ["Optical screening does not replace laboratory testing."]
+    },
+    recommendations: {
+      primary_action: "Follow standard maintenance protocol.",
+      operational_guidance: ["Monitor lubricant condition at regular intervals."],
+      laboratory_advisory: "Corroborate with ASTM laboratory tests when high criticality exists."
+    },
+    disclaimer: "Notice: LOOV VISION AI provides automated optical screening and does not replace ASTM laboratory tests."
+  };
+
+  const reportId = report.metadata?.report_id || result.report_id || "document";
+  const exec = report.executive_summary || {};
+  const finalClass = (exec.final_class || "c3").toLowerCase();
+  const models = report.models || {};
+  const agreement = report.agreement || {};
+  const reasoning = report.reasoning || {};
+  const recs = report.recommendations || {};
+  const meta = report.metadata || {};
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    setDownloadError(null);
+    try {
+      const response = await fetch('/api/report/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report: report, id: reportId })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `LoovVision_Analysis_Report_${reportId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.warn("Direct download failed, falling back to GET:", err);
+      try {
+        window.open(`/api/report/pdf?id=${encodeURIComponent(reportId)}`, '_blank');
+      } catch (e2) {
+        setDownloadError("Failed to download PDF. Please try again.");
+      }
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const renderProbBar = (label, value, variant) => {
+    const pct = typeof value === "number" ? (value * 100).toFixed(1) : "0.0";
+    return (
+      <div key={label} className="mb-2">
+        <div className="prob-meter-label">
+          <span className="text-secondary-light">{label}</span>
+          <span className="fw-bold text-light">{pct}%</span>
+        </div>
+        <div className="prob-meter-track">
+          <div
+            className="prob-meter-bar"
+            style={{
+              width: `${Math.min(100, Math.max(0, parseFloat(pct)))}%`,
+              backgroundColor: variant === "c1" ? "var(--loob-c1-green)" : variant === "c2" ? "var(--loob-c2-amber)" : "var(--loob-c3-red)"
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Modal
+      show={show}
+      onHide={onHide}
+      size="xl"
+      scrollable
+      centered
+      className="loob-report-modal"
+    >
+      <Modal.Header closeButton>
+        <div className="d-flex align-items-center justify-content-between w-100 me-3 flex-wrap gap-2">
+          <div className="d-flex align-items-center gap-3">
+            <div
+              className="d-flex align-items-center justify-content-center"
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #00b8d9 0%, #0066cc 100%)',
+                color: '#fff'
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              </svg>
+            </div>
+            <div>
+              <div className="fw-bold text-light fs-5" style={{ letterSpacing: '0.5px' }}>
+                LOOV VISION AI — LUBRICANT ANALYSIS REPORT
+              </div>
+              <div className="small text-muted font-monospace">
+                REPORT ID: <span className="text-cyan-light">{reportId}</span> • GENERATED: {meta.timestamp_formatted || meta.timestamp_iso}
+              </div>
+            </div>
+          </div>
+
+          <div className="report-action-toolbar ms-auto">
+            <div className="btn-group btn-group-sm me-2" role="group">
+              <button
+                type="button"
+                className={`btn ${viewMode === 'interactive' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                onClick={() => setViewMode('interactive')}
+              >
+                👁 Interactive View
+              </button>
+              <button
+                type="button"
+                className={`btn ${viewMode === 'pdf' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                onClick={() => setViewMode('pdf')}
+              >
+                📄 PDF Preview
+              </button>
+            </div>
+
+            <Button
+              size="sm"
+              className="btn-loob-primary d-inline-flex align-items-center gap-2"
+              onClick={handleDownloadPdf}
+              disabled={isDownloading}
+            >
+              {isDownloading ? (
+                <>
+                  <Spinner size="sm" animation="border" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Download PDF
+                </>
+              )}
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline-light"
+              className="d-inline-flex align-items-center gap-1"
+              onClick={handlePrint}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                <rect x="6" y="14" width="12" height="8"></rect>
+              </svg>
+              Print
+            </Button>
+
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onHide}
+            >
+              ✕ Back to Results
+            </Button>
+          </div>
+        </div>
+      </Modal.Header>
+
+      <Modal.Body className="p-3 p-md-4">
+        {downloadError && (
+          <Alert variant="danger" dismissible onClose={() => setDownloadError(null)} className="py-2">
+            {downloadError}
+          </Alert>
+        )}
+
+        {viewMode === 'pdf' ? (
+          <div className="pdf-preview-container d-flex flex-column">
+            <div className="p-2 bg-dark d-flex justify-content-between align-items-center border-bottom border-secondary">
+              <span className="small text-light">
+                Live PDF Document Preview (Generated on the fly via ReportLab)
+              </span>
+              <Button size="sm" variant="outline-info" onClick={handleDownloadPdf}>
+                Download Local Copy
+              </Button>
+            </div>
+            <iframe
+              src={`/api/report/pdf?id=${encodeURIComponent(reportId)}&preview=1`}
+              className="pdf-preview-iframe"
+              title="Loov Vision AI PDF Report"
+            />
+          </div>
+        ) : (
+          <div>
+            <div className="report-meta-grid">
+              <div className="report-meta-item">
+                <div className="meta-label">Report ID</div>
+                <div className="meta-value font-monospace text-cyan-light">{reportId}</div>
+              </div>
+              <div className="report-meta-item">
+                <div className="meta-label">Inspection Date</div>
+                <div className="meta-value">{meta.timestamp_formatted || meta.timestamp_iso}</div>
+              </div>
+              <div className="report-meta-item">
+                <div className="meta-label">Inspection Standard</div>
+                <div className="meta-value">{meta.inspection_type || "Multi-Modal Optical"}</div>
+              </div>
+              <div className="report-meta-item">
+                <div className="meta-label">Operational Urgency</div>
+                <div className="meta-value" style={{ color: finalClass === 'c1' ? 'var(--loob-c1-green)' : finalClass === 'c2' ? 'var(--loob-c2-amber)' : 'var(--loob-c3-red)' }}>
+                  {exec.operational_urgency || "Advisory"}
+                </div>
+              </div>
+              <div className="report-meta-item">
+                <div className="meta-label">Overall Confidence</div>
+                <div className="meta-value text-cyan-light">{exec.confidence_pct || "85.0%"}</div>
+              </div>
+            </div>
+
+            <div className={`report-assessment-card report-assessment-${finalClass}`}>
+              <Row className="align-items-center g-4">
+                <Col md={capturedImage ? 8 : 12}>
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <Badge bg={finalClass === "c1" ? "success" : finalClass === "c2" ? "warning" : "danger"} className="px-3 py-2 fs-6 fw-bold">
+                      {finalClass.toUpperCase()} — {exec.condition_label?.toUpperCase()}
+                    </Badge>
+                    <span className="small text-light fw-semibold">
+                      System Confidence: {exec.confidence_pct}
+                    </span>
+                  </div>
+                  <h4 className="fw-bold text-light mb-2">
+                    {exec.summary_headline || "Lubricant Condition Assessment"}
+                  </h4>
+                  <p className="text-secondary-light mb-0 small leading-relaxed">
+                    {exec.summary_text}
+                  </p>
+                </Col>
+
+                {capturedImage && (
+                  <Col md={4} className="text-center">
+                    <div className="p-2 rounded bg-dark border border-secondary border-opacity-50 d-inline-block">
+                      <img
+                        src={capturedImage}
+                        alt="Analysed Lubricant Sample"
+                        style={{ maxWidth: '100%', maxHeight: '140px', objectFit: 'contain', borderRadius: '4px' }}
+                      />
+                      <div className="small text-muted mt-1" style={{ fontSize: '0.7rem' }}>
+                        Analysed Sample ROI
+                      </div>
+                    </div>
+                  </Col>
+                )}
+              </Row>
+            </div>
+
+            <div className="mb-4">
+              <div className="report-section-title">
+                <span>1. MULTI-MODEL INFERENCE & EVIDENCE BREAKDOWN</span>
+              </div>
+
+              <Row className="g-3">
+                <Col md={4}>
+                  <div className="report-model-card">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <span className="fw-bold text-light small">{models.efficientnet?.model_name || "EfficientNet-B3"}</span>
+                      <Badge bg="info" text="dark" className="fw-bold">Weight: 55%</Badge>
+                    </div>
+
+                    <div className="mb-3 d-flex align-items-center justify-content-between p-2 rounded" style={{ background: 'var(--loob-bg-secondary)' }}>
+                      <span className="small text-muted">Predicted Class:</span>
+                      <Badge bg={models.efficientnet?.predicted_class === "c1" ? "success" : models.efficientnet?.predicted_class === "c2" ? "warning" : "danger"} className="px-2 py-1">
+                        {models.efficientnet?.predicted_class?.toUpperCase()} ({models.efficientnet?.condition_label})
+                      </Badge>
+                    </div>
+
+                    <div className="small fw-semibold text-light mb-1">Probability Distribution:</div>
+                    {renderProbBar("C1 (Fresh)", models.efficientnet?.probabilities?.c1, "c1")}
+                    {renderProbBar("C2 (Semi-degraded)", models.efficientnet?.probabilities?.c2, "c2")}
+                    {renderProbBar("C3 (Fully-degraded)", models.efficientnet?.probabilities?.c3, "c3")}
+
+                    <p className="small text-muted mt-3 mb-0" style={{ fontSize: '0.76rem', lineHeight: '1.4' }}>
+                      {models.efficientnet?.interpretation}
+                    </p>
+                  </div>
+                </Col>
+
+                <Col md={4}>
+                  <div className="report-model-card">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <span className="fw-bold text-light small">{models.color?.model_name || "Color Pipeline"}</span>
+                      <Badge bg="warning" text="dark" className="fw-bold">Weight: 15%</Badge>
+                    </div>
+
+                    <div className="mb-3 d-flex align-items-center justify-content-between p-2 rounded" style={{ background: 'var(--loob-bg-secondary)' }}>
+                      <span className="small text-muted">Predicted Class:</span>
+                      <Badge bg={models.color?.predicted_class === "c1" ? "success" : models.color?.predicted_class === "c2" ? "warning" : "danger"} className="px-2 py-1">
+                        {models.color?.predicted_class?.toUpperCase()} ({models.color?.condition_label})
+                      </Badge>
+                    </div>
+
+                    <div className="small fw-semibold text-light mb-1">Probability Distribution:</div>
+                    {renderProbBar("C1 (Fresh)", models.color?.probabilities?.c1, "c1")}
+                    {renderProbBar("C2 (Semi-degraded)", models.color?.probabilities?.c2, "c2")}
+                    {renderProbBar("C3 (Fully-degraded)", models.color?.probabilities?.c3, "c3")}
+
+                    {models.color?.features && (
+                      <div className="feature-pill-grid">
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">L* Median</span>
+                          <span className="feature-pill-val">{models.color.features.L_median}</span>
+                        </div>
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">V Median</span>
+                          <span className="feature-pill-val">{models.color.features.V_median}</span>
+                        </div>
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">Norm Green</span>
+                          <span className="feature-pill-val">{models.color.features.NG_median}</span>
+                        </div>
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">LAB B*</span>
+                          <span className="feature-pill-val">{models.color.features.LAB_B_median}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="small text-muted mt-3 mb-0" style={{ fontSize: '0.76rem', lineHeight: '1.4' }}>
+                      {models.color?.interpretation}
+                    </p>
+                  </div>
+                </Col>
+
+                <Col md={4}>
+                  <div className="report-model-card">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <span className="fw-bold text-light small">{models.texture?.model_name || "Texture Random Forest"}</span>
+                      <Badge bg="primary" className="fw-bold">Weight: 30%</Badge>
+                    </div>
+
+                    <div className="mb-3 d-flex align-items-center justify-content-between p-2 rounded" style={{ background: 'var(--loob-bg-secondary)' }}>
+                      <span className="small text-muted">Predicted Class:</span>
+                      <Badge bg={models.texture?.predicted_class === "c1" ? "success" : models.texture?.predicted_class === "c2" ? "warning" : "danger"} className="px-2 py-1">
+                        {models.texture?.predicted_class?.toUpperCase()} ({models.texture?.condition_label})
+                      </Badge>
+                    </div>
+
+                    <div className="small fw-semibold text-light mb-1">Probability Distribution:</div>
+                    {renderProbBar("C1 (Fresh)", models.texture?.probabilities?.c1, "c1")}
+                    {renderProbBar("C2 (Semi-degraded)", models.texture?.probabilities?.c2, "c2")}
+                    {renderProbBar("C3 (Fully-degraded)", models.texture?.probabilities?.c3, "c3")}
+
+                    {models.texture?.features && (
+                      <div className="feature-pill-grid">
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">Contrast</span>
+                          <span className="feature-pill-val">{models.texture.features.contrast}</span>
+                        </div>
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">Homogeneity</span>
+                          <span className="feature-pill-val">{models.texture.features.homogeneity}</span>
+                        </div>
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">Energy</span>
+                          <span className="feature-pill-val">{models.texture.features.energy}</span>
+                        </div>
+                        <div className="feature-pill-item">
+                          <span className="feature-pill-key">Correlation</span>
+                          <span className="feature-pill-val">{models.texture.features.correlation}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="small text-muted mt-3 mb-0" style={{ fontSize: '0.76rem', lineHeight: '1.4' }}>
+                      {models.texture?.interpretation}
+                    </p>
+                  </div>
+                </Col>
+              </Row>
+            </div>
+
+            <div className="report-consensus-banner">
+              <div
+                className="d-flex align-items-center justify-content-center flex-shrink-0"
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '10px',
+                  background: agreement.is_unanimous ? 'rgba(0, 201, 141, 0.2)' : 'rgba(245, 166, 35, 0.2)',
+                  color: agreement.is_unanimous ? 'var(--loob-c1-green)' : 'var(--loob-c2-amber)'
+                }}
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 11l3 3L22 4"></path>
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                </svg>
+              </div>
+              <div className="flex-grow-1">
+                <div className="d-flex align-items-center gap-2 mb-1">
+                  <span className="fw-bold text-light">MODEL AGREEMENT & CONSENSUS:</span>
+                  <Badge bg={agreement.is_unanimous ? "success" : "warning"} text={agreement.is_unanimous ? "light" : "dark"}>
+                    {agreement.consensus_status || "Analyzed"}
+                  </Badge>
+                </div>
+                <div className="small text-secondary-light">
+                  {agreement.agreement_analysis}
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="report-section-title">
+                <span>2. AI DECISION REASONING & EVIDENCE SYNTHESIS</span>
+              </div>
+              <Card className="loob-card mb-3">
+                <Card.Body className="p-3">
+                  <p className="text-light small mb-3 leading-relaxed">
+                    {reasoning.decision_narrative}
+                  </p>
+
+                  <Row className="g-3">
+                    <Col md={6}>
+                      <div className="p-2 rounded" style={{ background: 'var(--loob-bg)' }}>
+                        <div className="fw-bold text-cyan-light small mb-2">Supporting Visual Factors:</div>
+                        <ul className="small text-secondary-light mb-0 ps-3">
+                          {reasoning.supporting_factors?.map((f, idx) => (
+                            <li key={idx} className="mb-1">{f}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </Col>
+                    <Col md={6}>
+                      <div className="p-2 rounded" style={{ background: 'var(--loob-bg)' }}>
+                        <div className="fw-bold text-warning small mb-2">Technical Constraints & Caveats:</div>
+                        <ul className="small text-secondary-light mb-0 ps-3">
+                          {reasoning.uncertainties_or_caveats?.map((u, idx) => (
+                            <li key={idx} className="mb-1">{u}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </Col>
+                  </Row>
+                </Card.Body>
+              </Card>
+            </div>
+
+            <div className="report-rec-card mb-4">
+              <div className="d-flex align-items-center gap-2 mb-2">
+                <span className="fw-bold text-light fs-6">3. LUBRICANT MAINTENANCE & OPERATIONAL DIRECTIVES</span>
+              </div>
+              <div className="fw-bold text-cyan-light mb-2">
+                Directive: {recs.primary_action}
+              </div>
+              <ul className="small text-light mb-3 ps-3">
+                {recs.operational_guidance?.map((g, idx) => (
+                  <li key={idx} className="mb-1">{g}</li>
+                ))}
+              </ul>
+              {recs.laboratory_advisory && (
+                <div className="small text-secondary-light border-top border-secondary border-opacity-25 pt-2">
+                  <strong>Laboratory Advisory:</strong> {recs.laboratory_advisory}
+                </div>
+              )}
+            </div>
+
+            <div className="report-disclaimer-box">
+              <strong>OFFICIAL INDUSTRIAL NOTICE:</strong> {report.disclaimer}
+            </div>
+
+            <div className="mt-4 pt-3 border-top border-secondary border-opacity-25 d-flex justify-content-between align-items-center text-muted small">
+              <span>{meta.system_version || "LOOV VISION AI"} • Document ID: {reportId}</span>
+              <span>Screen View • Use 'Download PDF' for formal inspection documentation</span>
+            </div>
+          </div>
+        )}
+      </Modal.Body>
+    </Modal>
+  );
+}
+
+// ============================================================
 // MAIN APP COMPONENT
 // ============================================================
 function App() {
@@ -896,29 +1470,34 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [resultData, setResultData] = useState(null);
   const [errorState, setErrorState] = useState(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   const handleCapture = (imageData) => {
     setCapturedImage(imageData);
     setResultData(null);
     setErrorState(null);
+    setShowReportModal(false);
   };
 
   const handleUpload = (imageData) => {
     setCapturedImage(imageData);
     setResultData(null);
     setErrorState(null);
+    setShowReportModal(false);
   };
 
   const handleRetake = () => {
     setCapturedImage(null);
     setResultData(null);
     setErrorState(null);
+    setShowReportModal(false);
   };
 
   const handleNewAnalysis = () => {
     setCapturedImage(null);
     setResultData(null);
     setErrorState(null);
+    setShowReportModal(false);
   };
 
   const handleAnalyze = async () => {
@@ -979,11 +1558,20 @@ function App() {
                 error={errorState}
                 onNewAnalysis={handleNewAnalysis}
                 onRetry={handleAnalyze}
+                onOpenReport={() => setShowReportModal(true)}
               />
             </Col>
           </Row>
         </Container>
       </main>
+
+      {/* FULL ANALYSIS REPORT MODAL */}
+      <AnalysisReportModal 
+        show={showReportModal}
+        onHide={() => setShowReportModal(false)}
+        result={resultData}
+        capturedImage={capturedImage}
+      />
 
       <footer className="loob-footer text-center">
         <Container>

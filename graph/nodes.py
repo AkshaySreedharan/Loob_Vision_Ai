@@ -293,11 +293,17 @@ def normalize_model_result(
         )
     )
 
-    return {
+    res = {
         "prediction": prediction,
         "status": status,
         "probabilities": probabilities,
     }
+    if "model_name" in data:
+        res["model_name"] = data["model_name"]
+    if "features" in data:
+        res["features"] = data["features"]
+
+    return res
 
 
 # ============================================================

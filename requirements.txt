@@ -2,6 +2,7 @@ numpy
 pandas
 opencv-python-headless
 scikit-learn
+scikit-image
 joblib
 Pillow
 onnxruntime
@@ -9,3 +10,4 @@ python-dotenv
 pydantic
 langchain-google-genai
 langgraph
+reportlab

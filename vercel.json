@@ -5,6 +5,14 @@
       "destination": "/api/analyze.py"
     },
     {
+      "source": "/api/report/pdf",
+      "destination": "/api/report.py"
+    },
+    {
+      "source": "/api/report",
+      "destination": "/api/report.py"
+    },
+    {
       "source": "/api/status",
       "destination": "/api/status.py"
     },

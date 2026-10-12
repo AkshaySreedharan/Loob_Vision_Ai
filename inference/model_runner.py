@@ -7,7 +7,7 @@ import pandas as pd
 import joblib
 
 from inference.efficientnet_inference import EfficientNetInference
-from preprocessing.color_preprocess import extract_color_feature_vector
+from preprocessing.color_preprocess import extract_color_feature_vector, extract_color_features
 from preprocessing.texture_preprocess import extract_image_features
 
 
@@ -264,6 +264,9 @@ class LubricantModelRunner:
 
         return {
 
+            "model_name":
+                "EfficientNet-B3 (Optimized ONNX)",
+
             "prediction":
                 prediction,
 
@@ -291,8 +294,20 @@ class LubricantModelRunner:
         # training.
         # ----------------------------------------------------
 
-        features = extract_color_feature_vector(
+        color_feature_dict = extract_color_features(
             image_path
+        )
+
+        features = np.array(
+            [[
+                color_feature_dict["G_median"],
+                color_feature_dict["L_median"],
+                color_feature_dict["LAB_B_median"],
+                color_feature_dict["V_median"],
+                color_feature_dict["R_median"],
+                color_feature_dict["NG_median"],
+            ]],
+            dtype=np.float32
         )
 
         # ----------------------------------------------------
@@ -329,6 +344,9 @@ class LubricantModelRunner:
 
         return {
 
+            "model_name":
+                "Two-Stage Color Analysis Pipeline",
+
             "prediction":
                 prediction,
 
@@ -342,7 +360,12 @@ class LubricantModelRunner:
                 self.probabilities_to_dict(
                     classes,
                     probabilities
-                )
+                ),
+
+            "features": {
+                k: round(float(v), 4)
+                for k, v in color_feature_dict.items()
+            }
         }
 
     # ========================================================
@@ -363,27 +386,17 @@ class LubricantModelRunner:
         )
 
         # ----------------------------------------------------
-        # IMPORTANT:
-        #
-        # Preserve the EXACT feature order used during
-        # training.
+        # Preserve the EXACT feature order used during training.
         # ----------------------------------------------------
 
         feature_vector = [
-
             features[name]
-
             for name
             in self.texture_feature_names
         ]
 
         # ----------------------------------------------------
         # Create DataFrame using the original feature names.
-        #
-        # This also avoids:
-        #
-        # "X does not have valid feature names"
-        #
         # ----------------------------------------------------
 
         X = pd.DataFrame(
@@ -420,10 +433,26 @@ class LubricantModelRunner:
         )
 
         # ----------------------------------------------------
+        # Key summary texture metrics for reporting
+        # ----------------------------------------------------
+
+        key_texture_metrics = {
+            "contrast": round(float(features.get("contrast", 0.0)), 4),
+            "dissimilarity": round(float(features.get("dissimilarity", 0.0)), 4),
+            "homogeneity": round(float(features.get("homogeneity", 0.0)), 4),
+            "energy": round(float(features.get("energy", 0.0)), 4),
+            "correlation": round(float(features.get("correlation", 0.0)), 4),
+            "edge_density": round(float(features.get("edge_density", 0.0)), 4),
+        }
+
+        # ----------------------------------------------------
         # Return standardized result
         # ----------------------------------------------------
 
         return {
+
+            "model_name":
+                "Texture Random Forest v4",
 
             "prediction":
                 prediction,
@@ -438,7 +467,10 @@ class LubricantModelRunner:
                 self.probabilities_to_dict(
                     classes,
                     probabilities
-                )
+                ),
+
+            "features":
+                key_texture_metrics
         }
 
     # ========================================================
