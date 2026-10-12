@@ -56,7 +56,186 @@ function Header({ modelStatus, selectedModel, onModelChange }) {
 }
 
 // ============================================================
-// CAMERA / IMAGE PREVIEW PANEL
+// INTERACTIVE IMAGE CROPPER COMPONENT
+// ============================================================
+function ImageCropper({ imageSrc, onApply, onCancel, onReset }) {
+  const containerRef = useRef(null);
+  const imgRef = useRef(null);
+  const [crop, setCrop] = useState({ x: 10, y: 10, width: 80, height: 80 }); // Percentage (0-100)
+  const [dragState, setDragState] = useState(null);
+
+  const handleReset = () => {
+    setCrop({ x: 10, y: 10, width: 80, height: 80 });
+    if (onReset) onReset();
+  };
+
+  const startDrag = (mode, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    setDragState({
+      mode,
+      startX: clientX,
+      startY: clientY,
+      initialCrop: { ...crop }
+    });
+  };
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!dragState || !containerRef.current) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const deltaXPercent = ((clientX - dragState.startX) / rect.width) * 100;
+      const deltaYPercent = ((clientY - dragState.startY) / rect.height) * 100;
+
+      const init = dragState.initialCrop;
+      let newCrop = { ...crop };
+
+      if (dragState.mode === 'move') {
+        newCrop.x = Math.max(0, Math.min(100 - init.width, init.x + deltaXPercent));
+        newCrop.y = Math.max(0, Math.min(100 - init.height, init.y + deltaYPercent));
+      } else if (dragState.mode === 'tl') {
+        const newX = Math.max(0, Math.min(init.x + init.width - 15, init.x + deltaXPercent));
+        const newY = Math.max(0, Math.min(init.y + init.height - 15, init.y + deltaYPercent));
+        newCrop.width = init.width + (init.x - newX);
+        newCrop.height = init.height + (init.y - newY);
+        newCrop.x = newX;
+        newCrop.y = newY;
+      } else if (dragState.mode === 'tr') {
+        const newY = Math.max(0, Math.min(init.y + init.height - 15, init.y + deltaYPercent));
+        const newW = Math.max(15, Math.min(100 - init.x, init.width + deltaXPercent));
+        newCrop.height = init.height + (init.y - newY);
+        newCrop.y = newY;
+        newCrop.width = newW;
+      } else if (dragState.mode === 'bl') {
+        const newX = Math.max(0, Math.min(init.x + init.width - 15, init.x + deltaXPercent));
+        const newH = Math.max(15, Math.min(100 - init.y, init.height + deltaYPercent));
+        newCrop.width = init.width + (init.x - newX);
+        newCrop.x = newX;
+        newCrop.height = newH;
+      } else if (dragState.mode === 'br') {
+        const newW = Math.max(15, Math.min(100 - init.x, init.width + deltaXPercent));
+        const newH = Math.max(15, Math.min(100 - init.y, init.height + deltaYPercent));
+        newCrop.width = newW;
+        newCrop.height = newH;
+      }
+
+      setCrop(newCrop);
+    };
+
+    const handleEnd = () => {
+      setDragState(null);
+    };
+
+    if (dragState) {
+      window.addEventListener('mousemove', handleMove);
+      window.addEventListener('mouseup', handleEnd);
+      window.addEventListener('touchmove', handleMove, { passive: false });
+      window.addEventListener('touchend', handleEnd);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+    };
+  }, [dragState, crop]);
+
+  const applyCrop = () => {
+    if (!imgRef.current) return;
+    const img = imgRef.current;
+
+    const cropX = (crop.x / 100) * img.naturalWidth;
+    const cropY = (crop.y / 100) * img.naturalHeight;
+    const cropW = (crop.width / 100) * img.naturalWidth;
+    const cropH = (crop.height / 100) * img.naturalHeight;
+
+    if (cropW < 10 || cropH < 10) {
+      console.warn("Crop selection too small");
+      return;
+    }
+
+    const maxDim = 800;
+    let outW = cropW;
+    let outH = cropH;
+
+    if (Math.max(cropW, cropH) > maxDim) {
+      if (cropW >= cropH) {
+        outW = maxDim;
+        outH = Math.round((cropH * maxDim) / cropW);
+      } else {
+        outH = maxDim;
+        outW = Math.round((cropW * maxDim) / cropH);
+      }
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+
+    const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+    const origKb = Math.round((imageSrc.length * 0.75) / 1024);
+    const croppedKb = Math.round((croppedDataUrl.length * 0.75) / 1024);
+
+    console.log("[LOOB CROP] Original dimensions:", `${img.naturalWidth} x ${img.naturalHeight} (${origKb} KB)`);
+    console.log("[LOOB CROP] Cropped selection  :", `${Math.round(cropW)} x ${Math.round(cropH)}`);
+    console.log("[LOOB CROP] Final upload image :", `${outW} x ${outH} (${croppedKb} KB)`);
+
+    onApply(croppedDataUrl);
+  };
+
+  return (
+    <div className="d-flex flex-column h-100 justify-content-between">
+      <div className="cropper-wrapper mb-3" ref={containerRef}>
+        <div className="cropper-img-container">
+          <img ref={imgRef} src={imageSrc} className="cropper-img" alt="Crop target" />
+          <div className="cropper-backdrop"></div>
+
+          <div 
+            className="crop-box" 
+            style={{
+              left: `${crop.x}%`,
+              top: `${crop.y}%`,
+              width: `${crop.width}%`,
+              height: `${crop.height}%`
+            }}
+            onMouseDown={(e) => startDrag('move', e)}
+            onTouchStart={(e) => startDrag('move', e)}
+          >
+            <div className="crop-badge">SELECT LUBRICANT REGION</div>
+            <div className="crop-handle crop-handle-tl" onMouseDown={(e) => startDrag('tl', e)} onTouchStart={(e) => startDrag('tl', e)}></div>
+            <div className="crop-handle crop-handle-tr" onMouseDown={(e) => startDrag('tr', e)} onTouchStart={(e) => startDrag('tr', e)}></div>
+            <div className="crop-handle crop-handle-bl" onMouseDown={(e) => startDrag('bl', e)} onTouchStart={(e) => startDrag('bl', e)}></div>
+            <div className="crop-handle crop-handle-br" onMouseDown={(e) => startDrag('br', e)} onTouchStart={(e) => startDrag('br', e)}></div>
+          </div>
+        </div>
+      </div>
+
+      <Stack direction="horizontal" gap={2} className="justify-content-center">
+        <Button className="btn-loob-secondary flex-fill" onClick={handleReset}>
+          <span className="me-1">↺</span> Reset
+        </Button>
+        <Button className="btn-loob-secondary flex-fill" onClick={onCancel}>
+          <span className="me-1">✕</span> Cancel
+        </Button>
+        <Button className="btn-loob-primary flex-fill" onClick={applyCrop}>
+          <span className="me-1">✓</span> Apply Crop
+        </Button>
+      </Stack>
+    </div>
+  );
+}
+
+// ============================================================
+// CAMERA / IMAGE PREVIEW & CROP PANEL
 // ============================================================
 function CameraPanel({
   capturedImage,
@@ -71,10 +250,14 @@ function CameraPanel({
   const fileInputRef = useRef(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState(null);
+  const [isCropping, setIsCropping] = useState(false);
+  const [uncroppedImage, setUncroppedImage] = useState(null);
 
   useEffect(() => {
     if (!capturedImage) {
       startCamera();
+      setIsCropping(false);
+      setUncroppedImage(null);
     } else {
       stopCamera();
     }
@@ -114,12 +297,30 @@ function CameraPanel({
   const handleCaptureClick = () => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
+      const rawWidth = video.videoWidth || 640;
+      const rawHeight = video.videoHeight || 480;
+
+      const maxDim = 800;
+      let targetWidth = rawWidth;
+      let targetHeight = rawHeight;
+
+      if (Math.max(rawWidth, rawHeight) > maxDim) {
+        if (rawWidth >= rawHeight) {
+          targetWidth = maxDim;
+          targetHeight = Math.round((rawHeight * maxDim) / rawWidth);
+        } else {
+          targetHeight = maxDim;
+          targetWidth = Math.round((rawWidth * maxDim) / rawHeight);
+        }
+      }
+
       const canvas = canvasRef.current;
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/png');
+      ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      setUncroppedImage(dataUrl);
       onCapture(dataUrl);
     }
   };
@@ -129,9 +330,45 @@ function CameraPanel({
     if (file) {
       const reader = new FileReader();
       reader.onload = (evt) => {
-        onUpload(evt.target.result);
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 800;
+          let targetWidth = img.width;
+          let targetHeight = img.height;
+
+          if (Math.max(img.width, img.height) > maxDim) {
+            if (img.width >= img.height) {
+              targetWidth = maxDim;
+              targetHeight = Math.round((img.height * maxDim) / img.width);
+            } else {
+              targetHeight = maxDim;
+              targetWidth = Math.round((img.width * maxDim) / img.height);
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setUncroppedImage(dataUrl);
+          onUpload(dataUrl);
+        };
+        img.src = evt.target.result;
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleApplyCrop = (croppedDataUrl) => {
+    setIsCropping(false);
+    onCapture(croppedDataUrl);
+  };
+
+  const handleResetCrop = () => {
+    if (uncroppedImage) {
+      onCapture(uncroppedImage);
     }
   };
 
@@ -143,10 +380,10 @@ function CameraPanel({
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          {capturedImage ? "UPLOADED IMAGE PREVIEW" : "LIVE CAMERA PREVIEW"}
+          {isCropping ? "CROP LUBRICANT REGION" : capturedImage ? "UPLOADED IMAGE PREVIEW" : "LIVE CAMERA PREVIEW"}
         </div>
         <span className="badge bg-dark text-muted border border-secondary font-monospace" style={{ fontSize: '0.72rem' }}>
-          {capturedImage ? "IMAGE CAPTURED" : cameraActive ? "LIVE FEED" : "STANDBY"}
+          {isCropping ? "CROPPING" : capturedImage ? "IMAGE CAPTURED" : cameraActive ? "LIVE FEED" : "STANDBY"}
         </span>
       </div>
 
@@ -184,6 +421,13 @@ function CameraPanel({
               </div>
             )}
           </div>
+        ) : isCropping ? (
+          <ImageCropper 
+            imageSrc={uncroppedImage || capturedImage}
+            onApply={handleApplyCrop}
+            onCancel={() => setIsCropping(false)}
+            onReset={handleResetCrop}
+          />
         ) : (
           <div className="preview-container mb-3">
             <img src={capturedImage} alt="Lubricant Sample" className="preview-img" />
@@ -200,52 +444,62 @@ function CameraPanel({
         />
 
         {/* Action Controls */}
-        <Stack direction="horizontal" gap={3} className="justify-content-center">
-          {!capturedImage ? (
-            <>
-              <Button 
-                className="btn-loob-primary flex-fill" 
-                onClick={handleCaptureClick}
-                disabled={!cameraActive || isAnalyzing}
-              >
-                <span className="me-2">◉</span> CAPTURE
-              </Button>
-              <Button 
-                className="btn-loob-secondary flex-fill" 
-                onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                disabled={isAnalyzing}
-              >
-                <span className="me-2">↑</span> Upload Image
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button 
-                className="btn-loob-secondary flex-fill" 
-                onClick={onRetake}
-                disabled={isAnalyzing}
-              >
-                <span className="me-2">↻</span> RETAKE
-              </Button>
-              <Button 
-                className="btn-loob-primary flex-fill" 
-                onClick={onAnalyze}
-                disabled={isAnalyzing}
-              >
-                {isAnalyzing ? (
-                  <>
-                    <Spinner animation="border" size="sm" className="me-2" />
-                    ANALYZING...
-                  </>
-                ) : (
-                  <>
-                    <span className="me-2">⚡</span> ANALYZE IMAGE
-                  </>
-                )}
-              </Button>
-            </>
-          )}
-        </Stack>
+        {!isCropping && (
+          <Stack direction="horizontal" gap={2} className="justify-content-center">
+            {!capturedImage ? (
+              <>
+                <Button 
+                  className="btn-loob-primary flex-fill" 
+                  onClick={handleCaptureClick}
+                  disabled={!cameraActive || isAnalyzing}
+                >
+                  <span className="me-2">◉</span> CAPTURE
+                </Button>
+                <Button 
+                  className="btn-loob-secondary flex-fill" 
+                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                  disabled={isAnalyzing}
+                >
+                  <span className="me-2">↑</span> Upload Image
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button 
+                  className="btn-loob-secondary py-2 px-3" 
+                  onClick={() => setIsCropping(true)}
+                  disabled={isAnalyzing}
+                  title="Select and crop lubricant region"
+                >
+                  <span className="me-1">✂</span> Crop Image
+                </Button>
+                <Button 
+                  className="btn-loob-secondary py-2 px-3" 
+                  onClick={onRetake}
+                  disabled={isAnalyzing}
+                >
+                  <span className="me-1">↻</span> RETAKE
+                </Button>
+                <Button 
+                  className="btn-loob-primary flex-fill py-2" 
+                  onClick={onAnalyze}
+                  disabled={isAnalyzing}
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Spinner animation="border" size="sm" className="me-2" />
+                      ANALYZING...
+                    </>
+                  ) : (
+                    <>
+                      <span className="me-2">⚡</span> ANALYZE IMAGE
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </Stack>
+        )}
       </Card.Body>
     </Card>
   );
@@ -255,6 +509,8 @@ function CameraPanel({
 // RESULT ANALYSIS & TECHNICAL DETAILS PANEL
 // ============================================================
 function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
+  const [reasoningTheme, setReasoningTheme] = useState('gold');
+
   if (isAnalyzing) {
     return (
       <Card className="loob-card h-100">
@@ -347,8 +603,10 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
             <Accordion className="loob-accordion mb-4">
               <Accordion.Item eventKey="0">
                 <Accordion.Header>GATE REASONING</Accordion.Header>
-                <Accordion.Body className="text-muted">
-                  {result.gate_reasoning}
+                <Accordion.Body>
+                  <div className="gate-reasoning-content">
+                    {result.gate_reasoning}
+                  </div>
                 </Accordion.Body>
               </Accordion.Item>
             </Accordion>
@@ -376,13 +634,19 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
 
     const counts = { c1: 0, c2: 0, c3: 0 };
     if (effPred in counts) counts[effPred] += 0.55;
-    if (colPred in counts) counts[colPred] += 0.20;
-    if (texPred in counts) counts[texPred] += 0.25;
+    if (colPred in counts) counts[colPred] += 0.15;
+    if (texPred in counts) counts[texPred] += 0.30;
 
     finalClass = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
     const statusMap = { c1: "Fresh", c2: "Semi-degraded", c3: "Fully-degraded" };
     statusText = statusMap[finalClass] || "Analyzed";
     confidenceVal = counts[finalClass] || 0.85;
+  }
+
+  // Apply Classification Safety Rule
+  if ((finalClass === "c1" || finalClass === "c2") && confidenceVal < 0.55) {
+    finalClass = "c3";
+    statusText = "Fully-degraded";
   }
 
   const confidencePercentage = (confidenceVal * 100).toFixed(1) + "%";
@@ -458,7 +722,7 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
           <Accordion.Item eventKey="0">
             <Accordion.Header>▼ MODEL EVIDENCE</Accordion.Header>
             <Accordion.Body>
-              <p className="text-muted small mb-3">
+              <p className="small mb-3 text-secondary-light">
                 Evidence extracted from the individual parallel machine-learning classifiers:
               </p>
 
@@ -483,25 +747,25 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
               <div className="weights-container">
                 <div className="d-flex justify-content-between align-items-center mb-2">
                   <span className="fw-bold text-light small">FIXED MODEL WEIGHTS</span>
-                  <Badge bg="dark" className="text-muted border border-secondary font-monospace">READ-ONLY</Badge>
+                  <Badge bg="dark" className="text-light border border-secondary font-monospace">READ-ONLY</Badge>
                 </div>
-                <div className="weight-row text-muted">
-                  <span>EfficientNet-B3</span>
-                  <span className="fw-bold text-light">55%</span>
+                <div className="weight-row">
+                  <span className="text-light">EfficientNet-B3</span>
+                  <span className="fw-bold text-cyan-light">55%</span>
                 </div>
-                <div className="weight-row text-muted">
-                  <span>Color Analysis</span>
-                  <span className="fw-bold text-light">20%</span>
+                <div className="weight-row">
+                  <span className="text-light">Color Analysis</span>
+                  <span className="fw-bold text-cyan-light">15%</span>
                 </div>
-                <div className="weight-row text-muted">
-                  <span>Texture Analysis</span>
-                  <span className="fw-bold text-light">25%</span>
+                <div className="weight-row">
+                  <span className="text-light">Texture Analysis</span>
+                  <span className="fw-bold text-cyan-light">30%</span>
                 </div>
               </div>
 
               {/* MODEL AGREEMENT */}
               <div className="mt-3 d-flex align-items-center justify-content-between p-2 rounded" style={{ background: 'var(--loob-bg-secondary)' }}>
-                <span className="small text-muted fw-semibold">MODEL AGREEMENT</span>
+                <span className="small text-light fw-semibold">MODEL AGREEMENT</span>
                 {renderAgreementBadge(result)}
               </div>
             </Accordion.Body>
@@ -511,8 +775,10 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
           {result.analysis_report && (
             <Accordion.Item eventKey="1">
               <Accordion.Header>▼ AI ANALYSIS REPORT</Accordion.Header>
-              <Accordion.Body className="text-light font-monospace small" style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
-                {result.analysis_report}
+              <Accordion.Body>
+                <div className="analysis-report-content font-monospace small">
+                  {result.analysis_report}
+                </div>
               </Accordion.Body>
             </Accordion.Item>
           )}
@@ -521,8 +787,52 @@ function ResultPanel({ result, isAnalyzing, error, onNewAnalysis, onRetry }) {
           {result.reasoning && (
             <Accordion.Item eventKey="2">
               <Accordion.Header>▼ DECISION REASONING</Accordion.Header>
-              <Accordion.Body className="text-muted small" style={{ lineHeight: '1.6' }}>
-                {result.reasoning}
+              <Accordion.Body>
+                <div className="d-flex align-items-center justify-content-between mb-2 pb-1 border-bottom border-secondary border-opacity-25">
+                  <span className="small fw-bold text-uppercase" style={{ color: '#94a3b8', letterSpacing: '0.8px', fontSize: '0.72rem' }}>
+                    AI Decision Narrative
+                  </span>
+                  <div className="d-flex align-items-center gap-1">
+                    <span className="small me-1 text-muted" style={{ fontSize: '0.72rem' }}>Text Color:</span>
+                    <button
+                      type="button"
+                      className={`btn btn-sm py-0 px-2 rounded-pill ${reasoningTheme === 'gold' ? 'btn-warning text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                      style={{ fontSize: '0.72rem' }}
+                      onClick={(e) => { e.stopPropagation(); setReasoningTheme('gold'); }}
+                      title="Amber Gold"
+                    >
+                      ● Amber Gold
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm py-0 px-2 rounded-pill ${reasoningTheme === 'cyan' ? 'btn-info text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                      style={{ fontSize: '0.72rem' }}
+                      onClick={(e) => { e.stopPropagation(); setReasoningTheme('cyan'); }}
+                      title="Sky Cyan"
+                    >
+                      ● Sky Cyan
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-sm py-0 px-2 rounded-pill ${reasoningTheme === 'mint' ? 'btn-success text-dark fw-bold' : 'btn-outline-secondary text-light'}`}
+                      style={{ fontSize: '0.72rem' }}
+                      onClick={(e) => { e.stopPropagation(); setReasoningTheme('mint'); }}
+                      title="Mint Green"
+                    >
+                      ● Mint Green
+                    </button>
+                  </div>
+                </div>
+                <div 
+                  className={`decision-reasoning-content decision-reasoning-${reasoningTheme}`}
+                  style={{
+                    color: reasoningTheme === 'cyan' ? '#38bdf8' : reasoningTheme === 'mint' ? '#4ade80' : '#fde047',
+                    borderLeftColor: reasoningTheme === 'cyan' ? '#38bdf8' : reasoningTheme === 'mint' ? '#4ade80' : '#fde047',
+                    fontWeight: 500
+                  }}
+                >
+                  {result.reasoning}
+                </div>
               </Accordion.Body>
             </Accordion.Item>
           )}
@@ -539,8 +849,10 @@ function renderModelEvidenceRow(name, data) {
     return (
       <tr>
         <td className="fw-semibold text-light">{name}</td>
-        <td className="text-muted">N/A</td>
-        <td>-</td><td>-</td><td>-</td>
+        <td className="text-secondary-light">N/A</td>
+        <td className="text-secondary-light">-</td>
+        <td className="text-secondary-light">-</td>
+        <td className="text-secondary-light">-</td>
       </tr>
     );
   }
@@ -553,13 +865,13 @@ function renderModelEvidenceRow(name, data) {
     <tr>
       <td className="fw-semibold text-light">{name}</td>
       <td>
-        <Badge bg={pred === "C1" ? "success" : pred === "C2" ? "warning" : "danger"}>
+        <Badge bg={pred === "C1" ? "success" : pred === "C2" ? "warning" : "danger"} className="px-2 py-1">
           {pred}
         </Badge>
       </td>
-      <td>{formatProb(probs.c1)}</td>
-      <td>{formatProb(probs.c2)}</td>
-      <td>{formatProb(probs.c3)}</td>
+      <td className="text-light fw-semibold">{formatProb(probs.c1)}</td>
+      <td className="text-light fw-semibold">{formatProb(probs.c2)}</td>
+      <td className="text-light fw-semibold">{formatProb(probs.c3)}</td>
     </tr>
   );
 }

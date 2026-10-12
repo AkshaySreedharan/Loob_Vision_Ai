@@ -46,8 +46,8 @@ CLASS_STATUS = {
 
 FIXED_MODEL_WEIGHTS = {
     "efficientnet": 0.55,
-    "color": 0.20,
-    "texture": 0.25,
+    "color": 0.15,
+    "texture": 0.30,
 }
 
 
@@ -162,6 +162,68 @@ def image_to_data_url(image_path: str) -> str:
 
 
 # ============================================================
+# IMAGE -> COMPRESSED DATA URL FOR GEMINI VISION GATE
+# ============================================================
+
+def image_to_gemini_data_url(
+    image_path: str,
+    max_dim: int = 640,
+    quality: int = 85
+) -> str:
+    """
+    Creates an in-memory downsampled and compressed JPEG representation
+    specifically for Gemini Vision Gate API requests to drastically reduce
+    payload size and inference latency.
+
+    Does NOT modify or overwrite the original image file on disk.
+    """
+    import io
+    from PIL import Image
+
+    path = Path(image_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Image not found: {image_path}")
+
+    orig_file_size = path.stat().st_size
+
+    try:
+        with Image.open(path) as img:
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+
+            orig_w, orig_h = img.size
+
+            if max(orig_w, orig_h) > max_dim:
+                if orig_w >= orig_h:
+                    new_w = max_dim
+                    new_h = int(round((orig_h * max_dim) / orig_w))
+                else:
+                    new_h = max_dim
+                    new_w = int(round((orig_w * max_dim) / orig_h))
+
+                resized_img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            else:
+                resized_img = img
+                new_w, new_h = orig_w, orig_h
+
+            buffer = io.BytesIO()
+            resized_img.save(buffer, format="JPEG", quality=quality, optimize=True)
+            bytes_data = buffer.getvalue()
+            new_file_size = len(bytes_data)
+
+            print()
+            print(f"Original image : {orig_w}x{orig_h} ({orig_file_size / 1024:.1f} KB)")
+            print(f"Gemini image   : {new_w}x{new_h} ({new_file_size / 1024:.1f} KB)")
+
+            encoded = base64.b64encode(bytes_data).decode("utf-8")
+            return f"data:image/jpeg;base64,{encoded}"
+
+    except Exception as e:
+        print(f"[WARNING] Gemini image compression failed ({e}), using default data URL.")
+        return image_to_data_url(image_path)
+
+
+# ============================================================
 # NORMALIZE PROBABILITIES
 # ============================================================
 
@@ -258,7 +320,7 @@ def lubricant_gate_node(
 
     try:
 
-        image_data_url = image_to_data_url(
+        image_data_url = image_to_gemini_data_url(
             image_path
         )
 
@@ -878,8 +940,8 @@ FIXED MODEL WEIGHTS
 These weights are FIXED.
 
 EfficientNet-B3 = 0.55
-Color Analysis  = 0.20
-Texture Analysis = 0.25
+Color Analysis  = 0.15
+Texture Analysis = 0.30
 
 Do NOT change the weights.
 
@@ -891,9 +953,9 @@ DECISION RULES
 
 2. EfficientNet receives 55% evidence weight.
 
-3. Color Analysis receives 20% evidence weight.
+3. Color Analysis receives 15% evidence weight.
 
-4. Texture Analysis receives 25% evidence weight.
+4. Texture Analysis receives 30% evidence weight.
 
 5. Consider the complete probability distributions.
 
@@ -996,6 +1058,24 @@ chemical lubricant analysis.
             )
         )
 
+        # ----------------------------------------------------
+        # CLASSIFICATION SAFETY OVERRIDE RULE
+        # ----------------------------------------------------
+        # 1. c1 + confidence >= 0.55 -> c1
+        #    c1 + confidence <  0.55 -> c3
+        # 2. c2 + confidence >= 0.55 -> c2
+        #    c2 + confidence <  0.55 -> c3
+        # 3. c3 + any confidence       -> c3
+        # ----------------------------------------------------
+
+        if final_class in {"c1", "c2"} and confidence < 0.55:
+            print(
+                f"[SAFETY OVERRIDE] Class '{final_class}' with low confidence ({confidence:.3f} < 0.55) "
+                f"overridden to 'c3' (Fully-degraded)."
+            )
+            final_class = "c3"
+            status = CLASS_STATUS["c3"]
+
         decision_latency = (
             time.perf_counter()
             - start_time
@@ -1007,8 +1087,8 @@ chemical lubricant analysis.
 
         model_weights = {
             "efficientnet": 0.55,
-            "color": 0.20,
-            "texture": 0.25,
+            "color": 0.15,
+            "texture": 0.30,
         }
 
         reasoning = decision.get(
